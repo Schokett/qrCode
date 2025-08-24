@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>WLAN QR-Code Generator</title>
+    <!-- QRCode.js (leichtgewichtig, clientseitig) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+    <style>
+        :root {
+            --bg: #0b0f14;
+            --fg: #e7e9ee;
+            --card: #121821;
+            --muted: #a8b0bb;
+            --acc: #8ab4f8;
+            --border: #1c2430;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu;
+            background: var(--bg);
+            color: var(--fg);
+        }
+
+        .wrap {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 24px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1fr;
+            gap: 24px
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .25)
+        }
+
+        h1 {
+            margin: 0 0 8px
+        }
+
+        p {
+            color: var(--muted);
+            margin: 0 0 20px
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin: 14px 0 6px
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: #0f1520;
+            color: var(--fg)
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 16px
+        }
+
+        button {
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--acc);
+            color: #07111f;
+            font-weight: 700;
+            cursor: pointer
+        }
+
+        button.secondary {
+            background: transparent;
+            color: var(--fg)
+        }
+
+        .qr-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 320px;
+            background: #0f1520;
+            border: 1px dashed var(--border);
+            border-radius: 12px
+        }
+
+        .hint {
+            font-size: .9rem;
+            color: var(--muted);
+            margin-top: 8px
+        }
+
+        footer {
+            opacity: .7;
+            font-size: .85rem;
+            margin-top: 14px
+        }
+
+        @media (max-width:900px) {
+            .grid {
+                grid-template-columns: 1fr
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>WLAN QR-Code Generator</h1>
+        <p>Scannen → automatisch mit deinem WLAN verbinden. Funktioniert auf iOS, Android und vielen Laptops.</p>
+
+        <div class="grid">
+            <form class="card" id="wifiForm">
+                <label for="ssid">SSID (WLAN-Name)</label>
+                <input id="ssid" required placeholder="z. B. HyodoNet" />
+
+                <div class="row">
+                    <div>
+                        <label for="security">Sicherheit</label>
+                        <select id="security">
+                            <option value="WPA" selected>WPA/WPA2/WPA3</option>
+                            <option value="WEP">WEP</option>
+                            <option value="nopass">Kein Passwort (offen)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="hidden">SSID versteckt?</label>
+                        <select id="hidden">
+                            <option value="false" selected>Nein</option>
+                            <option value="true">Ja</option>
+                        </select>
+                    </div>
+                </div>
+
+                <label for="password">Passwort</label>
+                <input id="password" placeholder="mind. 12 Zeichen" />
+
+                <div class="actions">
+                    <button type="submit">QR-Code erzeugen</button>
+                    <button type="button" class="secondary" id="downloadBtn" disabled>Als PNG speichern</button>
+                    <button type="button" class="secondary" id="clearBtn">Zurücksetzen</button>
+                </div>
+                <div class="hint">Hinweis: Bei „offenem“ WLAN (nopass) wird das Passwort ignoriert.</div>
+            </form>
+
+            <div class="card">
+                <div id="qr" class="qr-area">QR erscheint hier …</div>
+                <footer> Hier ist dein QR-Code! Scanne ihn mit der Kamera-App deines Smartphones oder einem QR-Code-Scanner.</footer>
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <script>
+       
+        function escapeWifiText(t) {
+            return (t || "").replace(/([\\;,:"])/g, "\\$1");
+        }
+
+        function buildWifiString({ ssid, password, security, hidden }) {
+            const T = security;                       
+            const S = escapeWifiText(ssid);
+            const P = security === "nopass" ? "" : escapeWifiText(password);
+            const H = hidden ? "true" : "false";
+            
+            return `WIFI:T:${T};S:${S};${security === "nopass" ? "" : `P:${P};`}H:${H};;`;
+        }
+
+        const form = document.getElementById("wifiForm");
+        const qrContainer = document.getElementById("qr");
+        const dlBtn = document.getElementById("downloadBtn");
+        const clearBtn = document.getElementById("clearBtn");
+        let qrInstance = null;
+
+        function renderQR(text) {
+            qrContainer.innerHTML = ""; 
+            qrInstance = new QRCode(qrContainer, {
+                text,
+                width: 280,
+                height: 280,
+                correctLevel: QRCode.CorrectLevel.H
+            });
+           
+            dlBtn.disabled = false;
+        }
+
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const ssid = document.getElementById("ssid").value.trim();
+            const security = document.getElementById("security").value;
+            const hidden = document.getElementById("hidden").value === "true";
+            const password = document.getElementById("password").value;
+
+            if (!ssid) { alert("Bitte SSID eingeben."); return; }
+            if (security !== "nopass" && password.length < 1) {
+                alert("Bitte ein Passwort eingeben oder 'Kein Passwort' wählen.");
+                return;
+            }
+
+            const wifiString = buildWifiString({ ssid, password, security, hidden });
+            renderQR(wifiString);
+        });
+
+        dlBtn.addEventListener("click", () => {
+           
+            const canvas = qrContainer.querySelector("canvas");
+            let dataURL;
+            if (canvas) {
+                dataURL = canvas.toDataURL("image/png");
+            } else {
+                
+                const img = qrContainer.querySelector("img");
+                if (!img) return;
+                
+                const c = document.createElement("canvas");
+                c.width = img.naturalWidth || 280;
+                c.height = img.naturalHeight || 280;
+                const ctx = c.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+                dataURL = c.toDataURL("image/png");
+            }
+            const a = document.createElement("a");
+            a.href = dataURL;
+            a.download = "wifi_qr.png";
+            a.click();
+        });
+
+        clearBtn.addEventListener("click", () => {
+            form.reset();
+            qrContainer.innerHTML = "QR erscheint hier …";
+            dlBtn.disabled = true;
+        });
+    </script>
+</body>
+
+</html>
